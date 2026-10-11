@@ -1,0 +1,44 @@
+[
+    {
+        "date": "2026-10-03",
+        "title": "Agent简历项目启动",
+        "content": "确定项目选题并设计学习记录工具",
+        "key_points": "JSON数据结构和工具参数设计",
+        "unresolved": "还没有实时记录保存"
+    },
+    {
+        "date": "2026-10-03",
+        "title": "Day32学习记录工具",
+        "content": "完成学习记录的读取、添加和写入",
+        "key_points": "json.load、append和json.dump",
+        "unresolved": "还没有加入异常处理"
+    },
+    {
+        "date": "2026-10-04",
+        "title": "Day33查询学习记录工具",
+        "content": "完善文件异常处理，实现按关键词和日期查询学习记录",
+        "key_points": "FileNotFoundError、JSONDecodeError、strip、lower、join、组合筛选",
+        "unresolved": "文件读取代码存在重复，后续需要重构"
+    },
+    {
+        "date": "2026-10-05",
+        "title": "Day34重构与笔记搜索工具",
+        "content": "完成学习记录读取代码重构，并实现Markdown笔记关键词搜索。",
+        "key_points": "辅助函数、异常传递、os.listdir、os.path.join、endswith、文件读取与大小写匹配",
+        "unresolved": "还不能完全独立写出search_notes，需要继续练习循环、路径和异常处理"
+    },
+    {
+        "date": "2026-10-08",
+        "title": "Agent 循环与调用上限",
+        "content": "将单轮工具调用改成最多请求模型 3 次的循环。模型请求工具时，Agent 执行工具并把结果加入 messages；模型给出普通回答时，打印回答并结束循环。",
+        "key_points": "工具调用请求要先于对应的工具结果加入 messages；每一轮都要向模型提供工具 Schema；最后一轮如果仍请求工具，要在执行前停止并提示用户。",
+        "unresolved": "仍需练习独立编写 Agent 循环，以及验证模型连续多轮调用工具的情况。"
+    },
+    {
+        "date": "2026-10-11",
+        "title": "联调测试-Agent消息链",
+        "content": "学习了模型请求工具、执行工具、反馈结果的完整流程",
+        "key_points": "先保存assistant消息，再保存带tool_call_id的tool消息",
+        "unresolved": "待验证记录查询功能"
+    }
+]

@@ -1,0 +1,12 @@
+# API密钥与本地环境配置
+.env
+.env.*
+!.env.example
+
+# Python缓存
+__pycache__/
+*.py[cod]
+
+# 虚拟环境
+.venv/
+venv/
