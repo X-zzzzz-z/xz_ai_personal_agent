@@ -1,7 +1,8 @@
 import json
 import os
-DATA_FILE = "data/learning_records.json"
-NOTES_DIR = "notes"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))   
+DATA_FILE = os.path.join(BASE_DIR, "data", "learning_records.json")
+NOTES_DIR = os.path.join(BASE_DIR, "notes")
 from datetime import datetime
 from tool_schema import tool
 from rag import semantic_search

@@ -47,7 +47,15 @@ def execute_tool(registry,tool_name: str,arguments: str):
             "message": f"工具参数不匹配：{error}",
             "data": None
         }
-    return tool_func(**args)
+
+    try:
+        return tool_func(**args)
+    except Exception as error:
+        return{
+            "success":False,
+            "message":(f"工具执行失败：{type(error).__name__}:{error}"),
+            "data":None
+        }
     
 if __name__ == "__main__":
     from tool_registry import ToolRegistry
@@ -77,7 +85,14 @@ if __name__ == "__main__":
     used_search_tools = set()
     for round_num in range(3):
         available_tools = registry.get_schema() if round_num < 2 else None
-        message = chat(messages, tools=available_tools)
+        try:
+            message = chat(messages,tools=available_tools)
+        except Exception as error:
+            print(
+                f"模型请求失败：{type(error).__name__}：{error}"
+            )
+            print("本轮对话已停止。")
+            break
 
         messages.append(message)
 
