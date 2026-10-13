@@ -56,21 +56,22 @@ def execute_tool(registry,tool_name: str,arguments: str):
             "message":(f"工具执行失败：{type(error).__name__}:{error}"),
             "data":None
         }
+
     
-if __name__ == "__main__":
+def run_agent(user_input: str):
+#循环前：接受问题、注册工具、构造消息
     from tool_registry import ToolRegistry
     from learning_tools import (
         add_learning_record,
         query_learning_records,
         semantic_search_notes
     )
-
+#登记到注册表
     registry = ToolRegistry()
     registry.register(semantic_search_notes)
     registry.register(query_learning_records)
     registry.register(add_learning_record)
-
-    user_input = input("请输入你的问题：")
+#问题放入消息
     messages = [
         {
             "role": "system", 
@@ -82,24 +83,29 @@ if __name__ == "__main__":
             }
     ]
 
+#循环中：请求模型、按模型响应执行工具、再反馈结果
     used_search_tools = set()
     for round_num in range(3):
         available_tools = registry.get_schema() if round_num < 2 else None
         try:
             message = chat(messages,tools=available_tools)
         except Exception as error:
-            print(
-                f"模型请求失败：{type(error).__name__}：{error}"
-            )
-            print("本轮对话已停止。")
-            break
+            return {
+                "success": False,
+                "message": f"模型请求失败：{type(error).__name__}: {error}",
+                "data": None
+            }
 
         messages.append(message)
-
+#返回位置：将最终回答或失败信息交给调用方
         if message.tool_calls:
             if round_num == 2:
-                print("已达到最多3次模型调用，仍有工具待调用，本轮未执行。")
-                break
+                return {
+                    "success": False,
+                    "message": "已达到最多3次模型调用，仍有工具待调用，本轮未执行。",
+                    "data": None
+                }
+            
             for tool_call in message.tool_calls:
                 tool_name = tool_call.function.name
                 arguments = tool_call.function.arguments
@@ -134,5 +140,22 @@ if __name__ == "__main__":
                     "content": json.dumps(result, ensure_ascii=False)
                 })
         else:
-            print(message.content)
-            break
+            return {
+                "success": True,
+                "message": "问答完成",
+                "data": {"answer": message.content}
+            }
+    return {
+        "success": False,
+        "message": "问答流程结束，未获得最终回答",
+        "data": None
+    }
+
+if __name__ == "__main__":
+    user_input = input("请输入你的问题：")
+    result = run_agent(user_input)
+
+    if result["success"]:
+        print(result["data"]["answer"])
+    else:
+        print(result["message"])
