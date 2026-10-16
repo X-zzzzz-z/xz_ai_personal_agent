@@ -10,7 +10,6 @@ check_health 是“检查服务健康状态”的意思
 """
 import requests
 
-
 def ask_agent():
     payload = {
         "question": "查询我关于FastAPI的学习记录"

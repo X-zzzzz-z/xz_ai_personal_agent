@@ -1,8 +1,10 @@
+import pymysql
 import json
 import os
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))   
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "data", "learning_records.json")
 NOTES_DIR = os.path.join(BASE_DIR, "notes")
+from database import get_connection
 from datetime import datetime
 from tool_schema import tool
 from rag import semantic_search
@@ -24,80 +26,98 @@ def _load_learning_records():
 #第一个工具：添加学习记录
 @tool
 def add_learning_record(
-        date: str,
-        title: str,
-        content: str,
-        key_points: str,
-        unresolved: str
+    date: str,
+    title: str,
+    content: str,
+    key_points: str,
+    unresolved: str
 ):
     """添加学习记录，包括日期、标题、内容、学习重点和未掌握内容"""
     required_fields = {
-        "date":date,
-        "title":title,
-        "content":content,
-        "key_points":key_points,
-        "unresolved":unresolved
+        "date": date,
+        "title": title,
+        "content": content,
+        "key_points": key_points,
+        "unresolved": unresolved
     }
 
-    #执行前错误处理
     errors = []
 
-    for field_name,value in required_fields.items():            #字段格式校验
-        if not isinstance(value,str) or not value.strip():
+    #参数校验
+    for field_name, value in required_fields.items():
+        #检查输入是否合格
+        if not isinstance(value, str) or not value.strip():
             errors.append(f"{field_name}必须是非空字符串")
 
-    if isinstance(date,str) and date.strip():                   #日期格式校验
+    if isinstance(date, str) and date.strip():
         try:
             datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
             errors.append("date必须是 YYYY-MM-DD格式的有效日期")
+
     if errors:
         return {
             "success": False,
-            "message": "参数错误："+";".join(errors),
+            "message": "参数错误：" + ";".join(errors),
             "data": None
         }
+
+    #准备成功时返回给Agent的数据。
+    record = {
+        "date": date,
+        "title": title,
+        "content": content,
+        "key_points": key_points,
+        "unresolved": unresolved
+    }
+
+    connection = None
 
     try:
-        records = _load_learning_records()
-    except FileNotFoundError:                   #文件不存在，records=[]，自动创建文件
-        records = []
-    except json.JSONDecodeError:                #JSON内容损害，立即返回错误，防止覆盖内容
+        #建立SQL连接
+        connection = get_connection()
+
+        with connection.cursor() as cursor:
+            sql = """
+            INSERT INTO learning_records (
+                record_date,
+                title,
+                content,
+                key_points,
+                unresolved
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """
+
+            #新增记录到数据库
+            cursor.execute(
+                sql,
+                (date, title, content, key_points, unresolved)
+            )
+
+            record_id = cursor.lastrowid
+
+        connection.commit()
+
+    except pymysql.MySQLError as error:
+        if connection is not None:
+            connection.rollback()
+
         return {
             "success": False,
-            "message": f"数据文件错误：{DATA_FILE} 不是有效的JSON,已停止写入",
-            "data": None
-        }
-    except ValueError as error:
-        return {
-            "success": False,
-            "message": f"数据文件格式错误：{error}",
+            "message": f"数据库保存失败：{error}",
             "data": None
         }
 
-    record = {                                  #保存到JSON里字段名称：函数收到的参数值
-        "date":date,
-        "title":title,
-        "content":content,
-        "key_points":key_points,
-        "unresolved":unresolved
-    }
-    records.append(record)
+    finally:
+        if connection is not None:
+            connection.close()
 
-    with open(
-        DATA_FILE,
-        "w",
-        encoding="utf-8"
-    )as file:
-        json.dump(
-            records,
-            file,
-            ensure_ascii=False,
-            indent=4
-        )
+    record["id"] = record_id
+
     return {
         "success": True,
-        "message": f"学习记录保存成功: {title}",
+        "message": f"学习记录保存成功：{title}",
         "data": record
     }
 
@@ -109,67 +129,97 @@ def query_learning_records(
     date: str = ""
 ):
     """按关键词或日期查询学习记录，至少提供一个查询条件"""
-    if not isinstance(keyword,str) or not isinstance(date,str):
+    #检查参数是不是字符串
+    if not isinstance(keyword, str) or not isinstance(date, str):
         return {
             "success": False,
             "message": "参数错误：keyword和date必须是字符串",
             "data": None
         }
-    if not keyword.strip() and not date.strip():
+
+    keyword_value = keyword.strip().lower()
+    date_value = date.strip()
+
+    #检查是否至少提供了一个查询条件
+    if not keyword_value and not date_value:
         return {
             "success": False,
             "message": "参数错误：请至少提供关键词或日期",
             "data": None
         }
 
-    date_value = date.strip()
-
+    #检查日期格式是不是%Y-%m-%d
     if date_value:
         try:
-            datetime.strptime(date_value,"%Y-%m-%d")
+            datetime.strptime(date_value, "%Y-%m-%d")
         except ValueError:
             return {
                 "success": False,
                 "message": "参数错误：date必须是有效的 YYYY-MM-DD格式",
                 "data": None
             }
-        
+
+    #保存查询条件、参数值
+    conditions = []     #条件列表、保存SQL条件片段。
+    params = []     #参数列表、保存%s对应的实际值
+
+    if date_value:
+        conditions.append("record_date = %s")
+        params.append(date_value)
+
+    #有关键词时，增加关键词条件
+    #concat_ws('',...)  用空格连接标题、内容、重点、未掌握内容；跳过NULL
+    #lower() 把连接后的文本转换为小写
+    #locate(关键词，文本)  查找关键词的位置；找不到返回0
+    #>0  表示找到了关键词
+    if keyword_value:
+        conditions.append("""
+            LOCATE(
+                %s,
+                LOWER(CONCAT_WS(
+                    ' ', title, content, key_points, unresolved
+                ))
+            ) > 0
+        """)
+        params.append(keyword_value)
+
+    sql = """
+        SELECT
+            id,
+            record_date AS date,
+            title,
+            content,
+            key_points,
+            unresolved
+        FROM learning_records
+        WHERE
+    """
+
+    sql += " AND ".join(conditions)
+    sql += " ORDER BY record_date DESC, id DESC"
+
+    connection = None
+
     try:
-        records = _load_learning_records()
-    except FileNotFoundError:
+        connection = get_connection()
+
+        with connection.cursor() as cursor:
+            cursor.execute(sql, tuple(params))      #tuple(params)把参数列表转换为元组
+            matches = list(cursor.fetchall())
+
+        for record in matches:
+            record["date"] = record["date"].isoformat()
+
+    except pymysql.MySQLError as error:
         return {
             "success": False,
-            "message": "查询失败：学习记录文件不存在",
-            "data": None
-        }
-    except json.JSONDecodeError:
-        return {
-            "success": False,
-            "message": "查询失败：学习记录不是有效的JSON",
-            "data": None
-        }
-    except ValueError as error:
-        return {
-            "success": False,
-            "message": f"查询失败：{error}",
+            "message": f"数据库查询失败：{error}",
             "data": None
         }
 
-    matches = []                                    #matches  匹配结果  lower   转换为小写
-    keyword_lower = keyword.strip().lower()         #keyword_lower   将搜索关键字转换小写
-
-    for record in records:
-        search_text = " ".join([                    #search_text  搜索的文本  join  拼接
-            record.get("title",""),
-            record.get("content",""),
-            record.get("key_points",""),
-            record.get("unresolved","")
-        ]).lower()
-
-        keyword_match = not keyword_lower or keyword_lower in search_text
-        date_match = not date_value or record.get("date","") == date_value
-        if keyword_match and date_match:
-            matches.append(record)
+    finally:
+        if connection is not None:
+            connection.close()
 
     if not matches:
         return {
@@ -177,12 +227,12 @@ def query_learning_records(
             "message": "没有找到匹配的学习记录",
             "data": []
         }
+
     return {
         "success": True,
         "message": f"找到{len(matches)}条学习记录",
         "data": matches
     }
-
 
 #辅助函数：找出小节标题
 def split_markdown_sections(content: str):              #split:切分；section:小节.
@@ -266,7 +316,7 @@ def semantic_search_notes(query: str):
             "message": f"搜索失败：无法读取笔记：{error}",
             "data": None
         }
-    
+
     if not chunks:                 #检查是否一个可搜索片段都没有。这里目录可能存在，只是没有符合条件的笔记小节
         return {
             "success": True,        #读取过程没有出错，只是结果为空，用空列表表示没有结果
@@ -283,7 +333,7 @@ def semantic_search_notes(query: str):
 #actual: 实际的  actual_top_k:实际可以取出的数量
     actual_top_k = min(3,len(texts))
 
-#top_k：取相似度最高的多少条  
+#top_k：取相似度最高的多少条
     search_results = semantic_search(
         query=query.strip(),
         texts=texts,
@@ -324,7 +374,7 @@ def semantic_search_notes(query: str):
 
 
 #第三个工具：搜索笔记              @tool： 装饰器
-@tool                           
+@tool
 def search_notes(keyword: str):
     """根据关键词搜索Markdown笔记"""
     if not isinstance(keyword, str):
@@ -333,7 +383,7 @@ def search_notes(keyword: str):
             "message": "参数错误：keyword必须是字符串",
             "data": None
         }
-    
+
     keyword_lower = keyword.strip().lower()                     #提示词标准化
     if not keyword_lower:
         return {
@@ -341,14 +391,14 @@ def search_notes(keyword: str):
             "message": "参数错误：keyword不能为空",
             "data": None
         }
-    
+
     if not os.path.isdir(NOTES_DIR):
         return {
             "success": False,
             "message": "搜索失败：笔记目录不存在",
             "data": None
         }
-    
+
     file_names = os.listdir(NOTES_DIR)                          #listdir  列出目录内容
 
     matches = []                                                #matches  匹配结果

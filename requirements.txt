@@ -1,3 +1,4 @@
+#配置新环境py -3.13 -m pip install -r requirements.txt
 openai==3.14.1
 python-dotenv==1.2.3
 sentence-transformers==6.1.0
@@ -5,3 +6,4 @@ fastapi
 pydantic
 uvicorn
 requests
+PyMySQL==1.2.3

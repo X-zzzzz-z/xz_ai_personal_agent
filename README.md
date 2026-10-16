@@ -12,10 +12,10 @@ XZ AI Personal Learning Agent 是一个面向学生和自学者的个人学习�
 
 - 通过自然语言添加学习记录、查询记录和检索笔记。
 - 按关键词或日期直接查询学习记录。
-- 将学习记录保存到本地 JSON 文件。
+- 使用MySQL保存学习记录，支持参数化插入和条件查询。
 - 语义检索 Markdown 学习笔记。
 - 检查工具参数的 JSON 格式和调用结构。
-- 在学习工具中进行参数值校验及文件、JSON 异常处理。
+- 在学习工具中校验参数，处理数据库异常，并在写入失败时回滚事务。
 - 使用统一的结果字典返回工具执行结果。
 - 每次问答最多进行三轮模型调用，拦截重复搜索。
 - 通过 HTTP 提供健康检查、记录查询、记录添加和自然语言问答接口。
@@ -36,7 +36,9 @@ XZ AI Personal Learning Agent 是一个面向学生和自学者的个人学习�
 | FastAPI、Pydantic | HTTP 路由、请求解析和数据校验 |
 | Uvicorn | 运行 FastAPI 服务 |
 | Requests | 在 Python 客户端中发送 HTTP 请求 |
-| JSON、Markdown | 保存学习记录与学习笔记 |
+| MySQL、PyMySQL | 保存学习记录，通过 Python 执行 SQL |
+| Markdown | 保存学习笔记 |
+| JSON | 传递工具参数、工具结果和 HTTP 请求与响应数据 |
 
 ## 项目结构
 
@@ -52,9 +54,11 @@ XZ AI Personal Learning Agent 是一个面向学生和自学者的个人学习�
 | tool_schema.py | 为工具函数生成 Schema |
 | requirements.txt | 项目依赖清单 |
 | .env.example | 环境变量配置示例 |
-| data/learning_records.json | 保存学习记录 |
+| data/learning_records.json | 旧版学习记录文件，历史数据尚未自动迁移到 MySQL |
 | notes/ | 保存 Markdown 学习笔记 |
 | README.md | 项目说明 |
+| database.py | 读取数据库配置，提供 get_connection() 连接函数 |
+| init.sql | 初始化 MySQL 数据库、学习记录表和日期索引 |
 
 ## 核心流程
 
@@ -75,7 +79,7 @@ GET /records 和 POST /records 直接调用学习记录工具，不经过模型�
 
 | 工具 | 功能 |
 |---|---|
-| add_learning_record() | 添加学习记录并保存到 JSON 文件 |
+| add_learning_record() | 添加学习记录并提交保存到 MySQL |
 | query_learning_records() | 按关键词或日期查询学习记录 |
 | semantic_search_notes() | 语义检索 Markdown 笔记，返回相关片段 |
 
@@ -130,25 +134,57 @@ sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 
 模型调用需要网络连接和有效的 API Key。
 
-### 2. 配置 API Key
+### 2. 配置 API Key 和数据库密码
 
-在项目根目录创建 .env 文件：
+在项目根目录创建 `.env` 文件，填写自己的配置：
 
-~~~env
+```env
 DEEPSEEK_API_KEY=your_api_key
-~~~
+MYSQL_PASSWORD=your_mysql_password
+```
 
-模型名称和 API 地址在 llm.py 中配置。真实 API Key 不应提交到代码仓库。
+- `DEEPSEEK_API_KEY`：大模型 API 密钥。
+- `MYSQL_PASSWORD`：本机 MySQL 的 root 用户密码。
 
-### 3. 准备数据
+上面的值是占位文字，需要替换为自己的真实配置。
+`.env` 已加入 Git 忽略规则，真实密钥和密码应保留在本机。
 
-将 Markdown 学习笔记放入 notes/ 目录。
+模型名称和 API 地址在 `llm.py` 中配置。
+数据库连接在 `database.py` 中配置，目前连接本机
+`127.0.0.1:3306`，使用 root 用户和 `xz_agent` 数据库。
 
-data/learning_records.json 使用 JSON 数组保存记录。新建空数据文件时，内容为：
+### 3. 初始化数据库和准备笔记
 
-~~~json
-[]
-~~~
+需要先安装 MySQL 并启动数据库服务。
+
+在项目根目录的 PowerShell 中连接 MySQL：
+
+```powershell
+mysql -u root -p
+```
+
+按提示输入数据库密码。进入 `mysql>` 后执行：
+
+```sql
+SOURCE init.sql;
+```
+
+脚本会在数据库和表不存在时创建它们，并建立日期索引。
+它只创建结构，不包含学习记录；已有表不会被清空，
+也不会自动更新已有表的结构。
+
+完成后退出 MySQL：
+
+```sql
+exit;
+```
+
+当前学习记录的添加和查询使用 MySQL。
+旧的 `data/learning_records.json` 不再作为这两个工具的数据源，
+其中的历史记录尚未自动迁移到数据库。
+
+Markdown 学习笔记仍保存在 `notes/` 文件夹，
+由笔记搜索工具读取并进行语义检索。
 
 ### 4. 命令行问答
 
@@ -298,6 +334,8 @@ HTTP 状态码与响应体中的 success 是两个不同的信息，应分别检
 
 ## 已完成的手动联调验证
 
+以下为接入 MySQL 前的手动测试结果，其中学习记录使用 JSON 文件存储。
+这些结果不代表 MySQL 版本的 HTTP 接口已经完成回归验证。
 | 场景 | 已观察到的结果 |
 |---|---|
 | 搜索已有笔记 | 返回相关片段，模型生成回答并标注笔记来源 |
@@ -315,13 +353,29 @@ HTTP 状态码与响应体中的 success 是两个不同的信息，应分别检
 
 以上是已有手动测试样例的结果。超时捕获分支已编写，尚未通过受控超时场景验证；尚未建立完整的自动化测试和检索质量评估。
 
+### MySQL 接入后的手动验证
+
+| 场景 | 已观察到的结果 |
+|---|---|
+| 直接调用添加工具 | 成功写入 MySQL，返回记录编号，并通过 SQL 查询确认 |
+| 仅按日期查询 | 返回指定日期的学习记录 |
+| 仅按关键词查询 | 返回包含关键词的记录，支持去除关键词两边空格和忽略大小写 |
+| 同时提供日期和关键词 | 只返回同时满足两项条件的记录 |
+| 查询条件没有匹配记录 | 返回 success=True、data=[] |
+| Agent 自然语言添加后重新启动查询 | 成功读回“MySQL Agent闭环验证”记录，编号为 10 |
+| GET /records | 通过 HTTP 查询到 MySQL 中编号为 10 的记录 |
+| POST /records | 成功添加记录，返回编号 11 |
+| POST /chat | 通过自然语言查回编号 11，内容与添加结果一致 |
+
 ## 当前限制
 
 - 命令行每次启动处理一个问题；HTTP 请求之间尚未保存多轮对话上下文。
 - 单次问答最多进行三轮模型调用，第三轮不再提供工具说明。
 - 笔记搜索和记录查询各最多尝试一次，即使调用失败也会记录为已使用。
 - 无相关笔记时的回答行为受系统提示词约束，尚未经过大规模验证。
-- 学习记录使用本地 JSON 文件，尚未实现数据库存储与并发写入控制。
+- 历史 JSON 学习记录尚未迁移到 MySQL。
+- 尚未提供修改、删除学习记录的 Agent 工具。
+- MySQL 接入后的 HTTP 接口尚需回归验证。
 - 检索效果依赖笔记内容、分块方式和相关性判断，需要更多样例验证。
 - 各类业务失败的 HTTP 状态码，以及默认请求校验错误与业务错误的响应格式，尚未统一。
 - 当前 Python 客户端面向示例接口响应，尚未完整处理非 JSON 正文等异常响应。
@@ -342,5 +396,8 @@ HTTP 状态码与响应体中的 success 是两个不同的信息，应分别检
 
 已完成学习记录工具、语义检索、Agent 工具调用和 FastAPI 接口的集成。已使用接口文档和 Python 客户端验证查询、问答、请求校验及连接失败等场景。
 
-当前重点是整理运行文档和依赖清单、完善错误处理、验证异常场景，并持续提高独立编写和调试项目的能力。
+学习记录的添加和查询已接入 MySQL，并完成工具直接调用及 Agent
+自然语言添加、重新启动后查询的手动验证。Markdown 笔记仍通过文件读取和语义检索使用。
+
+当前重点是完成代码审查与Git提交，再进入Linux部署学习
 

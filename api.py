@@ -1,3 +1,4 @@
+#py -3.13 -m uvicorn api:app --reload
 """
 URL	Uniform Resource Locator，统一资源定位符	标明访问哪个地址、哪个资源，平时称为“网址”
 HTTP	Hypertext Transfer Protocol，超文本传输协议	规定客户端和服务器如何交换请求、响应
