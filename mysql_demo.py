@@ -78,7 +78,7 @@ def add_record(record_date, title, content):
             cursor.execute(sql, (record_date, title, content))
             record_id = cursor.lastrowid
 
-        connection.commit()         #筛选条件保存
+        connection.commit()         
         return record_id
 
     except pymysql.MySQLError:
